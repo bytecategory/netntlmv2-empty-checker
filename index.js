@@ -1,0 +1,66 @@
+const fs = require("fs");
+const crypto = require('crypto');
+function toUTF16LE(msg) {
+  var byteArray = new Uint8Array(msg.length * 2);
+  for (var i = 0; i < msg.length; i++) {
+    byteArray[i * 2] = msg.charCodeAt(i) 
+    byteArray[i * 2 + 1] = msg.charCodeAt(i) >> 8 
+  }
+  return byteArray
+}
+function ntlm(msg) {
+  let hash = crypto.createHash('md4');
+  hash.update(toUTF16LE(msg))
+  return hash.digest("hex")
+}
+function hmac_md5(password, msg) {
+  let hash = crypto.createHmac('md5', password);
+  hash.update(msg)
+  return hash.digest("hex")
+}
+
+function ntlmv2(password, user, domain) {
+  return hmac_md5(Buffer.from(ntlm(password), "hex"), toUTF16LE(user.toUpperCase() + domain))
+}
+
+function netntlmv2(password, user, domain, proofStr, blob) {
+  var ntlmv2_buffer = Buffer.from(ntlmv2(password, user, domain), "hex")
+  var blockToHmac = Buffer.from(proofStr + blob, "hex")
+  var hashedBlock = hmac_md5(ntlmv2_buffer, blockToHmac)
+  return hashedBlock
+}
+
+function isEmptyPassword(formattedHash) {
+  const passwordToTry = "test123";
+
+  let splitted = formattedHash.split(":");
+  let generatedHash = "";
+
+  if (splitted.length < 6) return false
+
+  let user = splitted[0],
+    domain = splitted[2],
+    challenge = splitted[3],
+    targetHash = splitted[4],
+    blob = splitted[5]
+
+  if (targetHash.length == 32)
+    generatedHash = netntlmv2(passwordToTry, user, domain, challenge, blob);
+  console.log(generatedHash.toUpperCase())
+  return generatedHash.toUpperCase() === targetHash.toUpperCase()
+}
+
+let readStream = fs.createReadStream("hashes.txt");
+
+var currentData = "";
+readStream.on("data", (buffer) => currentData += buffer);
+readStream.on("end", () => {
+  
+  var splitted = currentData.split(/\r\n|\n/g);
+
+  for (let part of splitted) {
+    if (isEmptyPassword(part)) {
+      console.log("password is correct!");
+    }
+  }
+});
